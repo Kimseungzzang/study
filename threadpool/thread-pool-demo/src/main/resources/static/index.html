@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thread Pool Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            padding: 16px;
+            min-height: 100vh;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #21262d;
+        }
+
+        h1 { font-size: 18px; color: #58a6ff; letter-spacing: 1px; }
+
+        .ws-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #f85149;
+            transition: background 0.3s;
+        }
+        .dot.on { background: #3fb950; }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .panel {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        h2 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #8b949e;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .slider-row label { color: #8b949e; min-width: 100px; }
+        .slider-row input[type=range] {
+            flex: 1;
+            accent-color: #58a6ff;
+            cursor: pointer;
+        }
+        .slider-val { min-width: 36px; text-align: right; color: #58a6ff; font-weight: bold; }
+
+        .slots-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            min-height: 54px;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: #0d1117;
+            border-radius: 6px;
+        }
+
+        .slot {
+            width: 44px;
+            height: 44px;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            transition: background 0.25s, border-color 0.25s;
+            border: 2px solid;
+        }
+
+        .slot.idle {
+            background: #0d2137;
+            border-color: #1f4068;
+            color: #58a6ff;
+        }
+
+        .slot.busy {
+            background: #3d1010;
+            border-color: #f85149;
+            color: #ff7b72;
+            animation: pulse 0.8s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(248,81,73,0); }
+            50% { transform: scale(1.06); box-shadow: 0 0 6px 2px rgba(248,81,73,0.3); }
+        }
+
+        .slot .slot-num { font-size: 14px; line-height: 1; }
+        .slot .slot-label { font-size: 8px; opacity: 0.7; margin-top: 2px; }
+
+        .stats-row {
+            display: flex;
+            gap: 12px;
+        }
+        .stat {
+            flex: 1;
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 8px;
+            text-align: center;
+        }
+        .stat-num {
+            font-size: 22px;
+            font-weight: bold;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+        .stat-lbl { font-size: 10px; color: #8b949e; text-transform: uppercase; }
+        .blue { color: #58a6ff; }
+        .green { color: #3fb950; }
+        .red { color: #f85149; }
+        .yellow { color: #d29922; }
+
+        .bottleneck-row {
+            margin-top: 12px;
+            font-size: 11px;
+            padding: 8px;
+            border-radius: 6px;
+            background: #0d1117;
+        }
+
+        .log-box {
+            background: #0d1117;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            height: 200px;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .log-entry {
+            font-size: 11px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            margin-bottom: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .log-entry.info { color: #8b949e; }
+        .log-entry.success { color: #3fb950; }
+        .log-entry.error { color: #f85149; }
+
+        .awaiting-bar {
+            margin-top: 6px;
+            height: 8px;
+            background: #0d1117;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid #21262d;
+        }
+        .awaiting-fill {
+            height: 100%;
+            background: #d29922;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .section-title {
+            font-size: 11px;
+            color: #8b949e;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Thread Pool & DB Connection Pool Demo</h1>
+    <div class="ws-status">
+        <div class="dot" id="ws-dot"></div>
+        <span id="ws-label">연결 중...</span>
+    </div>
+</header>
+
+<div class="grid-2">
+    <!-- Thread Pool Panel -->
+    <div class="panel">
+        <h2>🧵 Tomcat Thread Pool</h2>
+        <div class="slider-row">
+            <label>풀 크기</label>
+            <input type="range" id="tp-slider" min="1" max="50" value="5"
+                   oninput="onThreadPoolSlider(this.value)">
+            <span class="slider-val" id="tp-val">5</span>
+        </div>
+
+        <div class="slots-wrap" id="thread-slots"></div>
+
+        <div class="stats-row">
+            <div class="stat">
+                <div class="stat-num red" id="tp-active">0</div>
+                <div class="stat-lbl">활성</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num green" id="tp-completed">0</div>
+                <div class="stat-lbl">완료</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num yellow" id="tp-queue">0</div>
+                <div class="stat-lbl">대기</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DB Pool Panel -->
+    <div class="panel">
+        <h2>🗄️ DB Connection Pool (HikariCP)</h2>
+        <div class="slider-row">
+            <label>풀 크기</label>
+            <input type="range" id="db-slider" min="1" max="20" value="5"
+                   oninput="onDbPoolSlider(this.value)">
+            <span class="slider-val" id="db-val">5</span>
+        </div>
+
+        <div class="slots-wrap" id="db-slots"></div>
+
+        <div class="section-title">커넥션 대기 스레드</div>
+        <div class="awaiting-bar">
+            <div class="awaiting-fill" id="awaiting-fill" style="width:0%"></div>
+        </div>
+
+        <div class="stats-row" style="margin-top:12px">
+            <div class="stat">
+                <div class="stat-num red" id="db-active">0</div>
+                <div class="stat-lbl">사용중</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num green" id="db-idle">0</div>
+                <div class="stat-lbl">유휴</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num yellow" id="db-waiting">0</div>
+                <div class="stat-lbl">대기</div>
+            </div>
+        </div>
+
+        <div class="bottleneck-row" id="bottleneck-warn"></div>
+    </div>
+</div>
+
+<!-- Log -->
+<div class="panel">
+    <h2>📋 실시간 로그</h2>
+    <div class="log-box" id="log-box"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+<script>
+    let stompClient = null;
+
+    function connect() {
+        const socket = new SockJS('/ws');
+        stompClient = Stomp.over(socket);
+        stompClient.debug = null;
+
+        stompClient.connect({}, () => {
+            document.getElementById('ws-dot').classList.add('on');
+            document.getElementById('ws-label').textContent = '연결됨';
+
+            stompClient.subscribe('/topic/status', msg => {
+                updateUI(JSON.parse(msg.body));
+            });
+            stompClient.subscribe('/topic/log', msg => {
+                const e = JSON.parse(msg.body);
+                addLog(e.time, e.message, e.level);
+            });
+        }, () => {
+            document.getElementById('ws-dot').classList.remove('on');
+            document.getElementById('ws-label').textContent = '재연결 중...';
+            setTimeout(connect, 3000);
+        });
+    }
+
+    function updateUI(status) {
+        if (status.threadPool) updateThreadPool(status.threadPool);
+        if (status.dbPool) updateDbPool(status.dbPool);
+        updateBottleneckWarn(status);
+    }
+
+    function updateThreadPool(tp) {
+        document.getElementById('tp-active').textContent = tp.activeCount || 0;
+        document.getElementById('tp-completed').textContent = tp.completedCount || 0;
+        document.getElementById('tp-queue').textContent = tp.queueSize || 0;
+        document.getElementById('tp-val').textContent = tp.poolSize || 0;
+        document.getElementById('tp-slider').value = tp.poolSize || 0;
+        renderSlots('thread-slots', tp.slots || [], 'T');
+    }
+
+    function updateDbPool(db) {
+        document.getElementById('db-active').textContent = db.activeConnections || 0;
+        document.getElementById('db-idle').textContent = db.idleConnections || 0;
+        document.getElementById('db-waiting').textContent = db.threadsAwaiting || 0;
+        document.getElementById('db-val').textContent = db.maxSize || 0;
+        document.getElementById('db-slider').value = db.maxSize || 0;
+
+        const awaitPct = Math.min(100, ((db.threadsAwaiting || 0) / (db.maxSize || 1)) * 100 * 2);
+        document.getElementById('awaiting-fill').style.width = awaitPct + '%';
+
+        renderSlots('db-slots', db.slots || [], 'C');
+    }
+
+    function updateBottleneckWarn(status) {
+        const tp = status.threadPool;
+        const db = status.dbPool;
+        if (!tp || !db) return;
+        const warn = document.getElementById('bottleneck-warn');
+        if (tp.poolSize > db.maxSize) {
+            warn.style.color = '#f85149';
+            warn.textContent = `⚠ 스레드(${tp.poolSize}) > 커넥션(${db.maxSize}) → ${tp.poolSize - db.maxSize}개 스레드가 커넥션 대기 가능`;
+        } else {
+            warn.style.color = '#3fb950';
+            warn.textContent = `✓ 스레드(${tp.poolSize}) ≤ 커넥션(${db.maxSize}) → 병목 없음`;
+        }
+    }
+
+    function renderSlots(containerId, slots, prefix) {
+        const container = document.getElementById(containerId);
+        while (container.children.length < slots.length) container.appendChild(document.createElement('div'));
+        while (container.children.length > slots.length) container.removeChild(container.lastChild);
+        for (let i = 0; i < slots.length; i++) {
+            const el = container.children[i];
+            const busy = slots[i].state === 'BUSY';
+            el.className = 'slot ' + (busy ? 'busy' : 'idle');
+            el.innerHTML = `<span class="slot-num">${prefix}${i + 1}</span><span class="slot-label">${busy ? 'BUSY' : 'IDLE'}</span>`;
+        }
+    }
+
+    function addLog(time, message, level) {
+        const box = document.getElementById('log-box');
+        const el = document.createElement('div');
+        el.className = 'log-entry ' + (level || 'info');
+        el.textContent = `[${time}] ${message}`;
+        box.insertBefore(el, box.firstChild);
+        while (box.children.length > 120) box.removeChild(box.lastChild);
+    }
+
+    let tpTimer = null;
+    function onThreadPoolSlider(val) {
+        document.getElementById('tp-val').textContent = val;
+        clearTimeout(tpTimer);
+        tpTimer = setTimeout(() => fetch('/api/thread-pool-size?size=' + val, { method: 'POST' }), 300);
+    }
+
+    let dbTimer = null;
+    function onDbPoolSlider(val) {
+        document.getElementById('db-val').textContent = val;
+        clearTimeout(dbTimer);
+        dbTimer = setTimeout(() => fetch('/api/db-pool-size?size=' + val, { method: 'POST' }), 300);
+    }
+
+    connect();
+</script>
+</body>
+</html>
