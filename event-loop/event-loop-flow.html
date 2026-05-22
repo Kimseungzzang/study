@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event Loop 흐름 시각화</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #687385;
+      --line: #d8dee8;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --green: #15803d;
+      --green-soft: #dcfce7;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --red: #b91c1c;
+      --red-soft: #fee2e2;
+      --shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-end;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      min-height: 42px;
+    }
+
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .board,
+    .side {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .board {
+      padding: 18px;
+    }
+
+    .code {
+      margin: 0 0 18px;
+      padding: 16px;
+      background: #101827;
+      color: #e5e7eb;
+      border-radius: 8px;
+      font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-x: auto;
+    }
+
+    .code .active-line {
+      display: block;
+      margin: 0 -8px;
+      padding: 0 8px;
+      background: rgba(37, 99, 235, 0.38);
+      border-radius: 4px;
+    }
+
+    .diagram {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .node {
+      min-height: 132px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: #fbfcfe;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .node.active {
+      transform: translateY(-3px);
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .node.done {
+      border-color: #86efac;
+      background: var(--green-soft);
+    }
+
+    .node.waiting {
+      border-color: #fcd34d;
+      background: var(--amber-soft);
+    }
+
+    .node h2 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.3;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .queue-items {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 66px;
+      padding: 8px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .queue-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 30px;
+      padding: 5px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #fff;
+      color: #1f2937;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .queue-item::after {
+      content: "대기";
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      margin-left: 8px;
+    }
+
+    .queue-item.running {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: #1d4ed8;
+    }
+
+    .queue-item.running::after {
+      content: "실행";
+      color: #1d4ed8;
+    }
+
+    .queue-empty {
+      display: grid;
+      place-items: center;
+      min-height: 48px;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 28px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: #eef2f7;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .chip.blue {
+      background: var(--accent-soft);
+      color: #1d4ed8;
+    }
+
+    .chip.green {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .chip.amber {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .chip.red {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .arrow {
+      display: none;
+    }
+
+    .side {
+      padding: 18px;
+    }
+
+    .step-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+    }
+
+    .step-number {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 6px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .step-title {
+      margin: 0 0 8px;
+      font-size: 22px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    .step-desc {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .state-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 105px;
+      background: #fbfcfe;
+    }
+
+    .state-box h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+
+    .state-value {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      word-break: keep-all;
+    }
+
+    .console {
+      margin-top: 16px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #111827;
+      background: #0b1020;
+    }
+
+    .console-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 38px;
+      padding: 8px 12px;
+      background: #111827;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .console-body {
+      min-height: 144px;
+      margin: 0;
+      padding: 12px;
+      color: #e5e7eb;
+      font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+
+    .console-empty {
+      color: #64748b;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(var(--step-count), 1fr);
+      gap: 6px;
+      margin-top: 18px;
+    }
+
+    .tick {
+      height: 10px;
+      border-radius: 999px;
+      background: #e5e7eb;
+    }
+
+    .tick.active,
+    .tick.done {
+      background: var(--accent);
+    }
+
+    @media (max-width: 920px) {
+      header {
+        display: block;
+      }
+
+      .controls {
+        justify-content: flex-start;
+        margin-top: 16px;
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .diagram {
+        grid-template-columns: 1fr;
+      }
+
+      .node {
+        min-height: 104px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding: 18px 0;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .state-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .controls button {
+        flex: 1 1 calc(50% - 8px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Node.js Event Loop 흐름</h1>
+        <p class="subtitle">Timer, I/O, Microtask, DB 작업이 각자 다른 대기 지점을 거쳐 Event Loop로 돌아오는 흐름을 단계별로 확인한다.</p>
+      </div>
+      <div class="controls">
+        <button id="prevBtn" type="button">이전</button>
+        <button id="nextBtn" class="primary" type="button">다음</button>
+        <button id="resetBtn" type="button">처음</button>
+      </div>
+    </header>
+
+    <section class="layout">
+      <div class="board">
+        <pre class="code" aria-label="예시 코드"><code id="codeBlock"></code></pre>
+
+        <div class="diagram" aria-label="Event Loop 구조">
+          <div class="node" id="jsNode">
+            <h2>JavaScript Thread</h2>
+            <span class="chip" id="jsChip">대기</span>
+            <p id="jsText">현재 JS 코드를 실행하는 단일 스레드.</p>
+          </div>
+
+          <div class="node" id="libuvNode">
+            <h2>libuv</h2>
+            <span class="chip" id="libuvChip">대기</span>
+            <p id="libuvText">비동기 I/O를 OS나 Thread Pool로 넘긴다.</p>
+          </div>
+
+          <div class="node" id="poolNode">
+            <h2>Network / External API</h2>
+            <span class="chip" id="poolChip">대기</span>
+            <p id="poolText">외부 API 요청은 네트워크와 상대 서버에서 처리된다.</p>
+          </div>
+
+          <div class="node" id="dbNode">
+            <h2>DB Connection Pool</h2>
+            <span class="chip" id="dbChip">대기</span>
+            <p id="dbText">DB 드라이버가 connection 한도 안에서 query를 실행한다.</p>
+          </div>
+
+          <div class="node" id="microNode">
+            <h2>Microtask Queue</h2>
+            <span class="chip" id="microChip">비어 있음</span>
+            <p id="microText">Promise then, await 이후 continuation이 대기한다.</p>
+            <div class="queue-items" id="microItems"></div>
+          </div>
+
+          <div class="node" id="timerNode">
+            <h2>Timer Queue</h2>
+            <span class="chip" id="timerChip">비어 있음</span>
+            <p id="timerText">setTimeout, setInterval callback이 대기한다.</p>
+            <div class="queue-items" id="timerItems"></div>
+          </div>
+
+          <div class="node" id="ioQueueNode">
+            <h2>I/O Queue</h2>
+            <span class="chip" id="ioQueueChip">비어 있음</span>
+            <p id="ioQueueText">네트워크, DB 완료 이벤트가 처리 대기한다.</p>
+            <div class="queue-items" id="ioItems"></div>
+          </div>
+
+          <div class="node" id="loopNode">
+            <h2>Event Loop</h2>
+            <span class="chip" id="loopChip">감시 중</span>
+            <p id="loopText">Call Stack이 비면 우선순위와 phase에 따라 queue를 처리한다.</p>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="step-top">
+          <div>
+            <h2 class="step-title" id="stepTitle"></h2>
+            <p class="step-desc" id="stepDesc"></p>
+          </div>
+          <span class="step-number" id="stepNumber"></span>
+        </div>
+
+        <div class="state-grid">
+          <div class="state-box">
+            <h3>Call Stack</h3>
+            <p class="state-value" id="stackState"></p>
+          </div>
+          <div class="state-box">
+            <h3>I/O 상태</h3>
+            <p class="state-value" id="ioState"></p>
+          </div>
+          <div class="state-box">
+            <h3>Queue 상태</h3>
+            <p class="state-value" id="queueState"></p>
+          </div>
+          <div class="state-box">
+            <h3>핵심 포인트</h3>
+            <p class="state-value" id="pointState"></p>
+          </div>
+        </div>
+
+        <div class="console" aria-label="콘솔 출력">
+          <div class="console-title">
+            <span>Console</span>
+            <span id="consoleStatus">대기</span>
+          </div>
+          <pre class="console-body" id="consoleOutput"></pre>
+        </div>
+
+        <div class="timeline" id="timeline" aria-label="진행 단계"></div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const codeLines = [
+      'const db = createDbPool({ max: 10 });',
+      '',
+      'console.log("1");',
+      '',
+      'const apiPromise = fetch("https://api.example.com/users");',
+      'const dbPromise = db.query("select * from users");',
+      '',
+      'setTimeout(() => console.log("timer"), 0);',
+      '',
+      'apiPromise.then(() => console.log("api then"));',
+      'dbPromise.then(() => console.log("db then"));',
+      '',
+      'console.log("2");'
+    ];
+
+    const baseChips = {
+      jsChip: ["", "대기"],
+      libuvChip: ["", "대기"],
+      poolChip: ["", "대기"],
+      dbChip: ["", "대기"],
+      microChip: ["", "비어 있음"],
+      timerChip: ["", "비어 있음"],
+      ioQueueChip: ["", "비어 있음"],
+      loopChip: ["", "감시 중"]
+    };
+
+    function step(config) {
+      return {
+        activeLine: 0,
+        active: [],
+        done: [],
+        waiting: [],
+        chips: {},
+        stack: "비어 있음",
+        io: "없음",
+        queue: "모든 queue 비어 있음",
+        queueItems: {
+          micro: [],
+          timer: [],
+          io: []
+        },
+        point: "",
+        ...config
+      };
+    }
+
+    const steps = [
+      step({
+        title: "JS 코드 실행 시작",
+        desc: "JS 메인 스레드가 전역 코드를 위에서부터 실행한다. 실행 중인 동기 코드가 끝나기 전에는 queue callback이 끼어들 수 없다.",
+        activeLine: 0,
+        active: ["jsNode"],
+        chips: { jsChip: ["blue", "실행 중"] },
+        stack: "전역 실행 컨텍스트",
+        point: "JS 메인 스레드는 먼저 전역 동기 코드를 위에서부터 실행한다.",
+        console: []
+      }),
+      step({
+        title: "console.log(1) 실행",
+        desc: "동기 코드는 바로 Call Stack에서 실행된다. 아직 queue에 들어간 callback은 없다.",
+        activeLine: 2,
+        active: ["jsNode"],
+        chips: { jsChip: ["blue", "console.log 실행"] },
+        stack: "console.log(\"1\")",
+        point: "동기 작업은 Event Loop를 거치지 않고 즉시 실행된다.",
+        console: ["1"]
+      }),
+      step({
+        title: "외부 API Promise 비동기 시작",
+        desc: "fetch는 외부 API 요청을 시작하고 Promise를 반환한다. 아직 응답이 안 왔으므로 then callback은 queue에 들어가지 않았다.",
+        activeLine: 4,
+        active: ["jsNode", "libuvNode", "poolNode"],
+        waiting: ["poolNode"],
+        chips: {
+          jsChip: ["blue", "API 요청"],
+          libuvChip: ["blue", "네트워크 접수"],
+          poolChip: ["amber", "API 응답 대기"]
+        },
+        stack: "fetch(...) 호출 후 Promise 반환",
+        io: "외부 API 요청이 네트워크 / 상대 서버에서 처리 중",
+        queue: "아직 Promise then callback 없음",
+        point: "실제 비동기 작업은 Promise가 아니라 네트워크, OS, 외부 API 서버 같은 외부 자원이 처리한다.",
+        console: ["1"]
+      }),
+      step({
+        title: "DB Promise 비동기 시작",
+        desc: "db.query도 Promise를 반환한다고 가정한다. 실제 query는 DB connection pool과 DB 서버 쪽에서 진행된다.",
+        activeLine: 5,
+        active: ["jsNode", "dbNode"],
+        waiting: ["poolNode", "dbNode"],
+        chips: {
+          jsChip: ["blue", "DB 요청"],
+          libuvChip: ["green", "API 요청 위임"],
+          poolChip: ["amber", "API 응답 대기"],
+          dbChip: ["amber", "query 실행 중"]
+        },
+        stack: "db.query(...) 호출 후 Promise 반환",
+        io: "외부 API 요청 진행 중, DB query 진행 중",
+        queue: "아직 Promise then callback 없음",
+        point: "DB 작업은 Node의 JS 스레드가 하는 게 아니라 DB connection pool과 DB 서버 자원에 묶인다.",
+        console: ["1"]
+      }),
+      step({
+        title: "Timer callback 등록",
+        desc: "setTimeout callback은 시간이 만료된 뒤 Timer Queue에서 대기한다. 0ms여도 지금 즉시 실행되지는 않는다.",
+        activeLine: 7,
+        active: ["jsNode", "timerNode"],
+        waiting: ["poolNode", "dbNode", "timerNode"],
+        chips: {
+          jsChip: ["blue", "timer 등록"],
+          libuvChip: ["green", "API 요청 위임"],
+          poolChip: ["amber", "API 응답 대기"],
+          dbChip: ["amber", "query 실행 중"],
+          timerChip: ["amber", "timer 예약"]
+        },
+        stack: "setTimeout(...) 등록",
+        io: "외부 API 요청과 DB query는 계속 진행 중",
+        queue: "Timer callback 예약, Promise then callback은 아직 없음",
+        queueItems: {
+          micro: [],
+          timer: ["timer callback"],
+          io: []
+        },
+        point: "Timer는 I/O와 별도 queue/phase에서 실행 후보가 된다.",
+        console: ["1"]
+      }),
+      step({
+        title: "then handler 등록",
+        desc: "apiPromise.then과 dbPromise.then은 완료 후 실행할 함수를 등록한다. Promise가 아직 pending이면 Microtask Queue에는 아직 들어가지 않는다.",
+        activeLine: 9,
+        active: ["jsNode", "microNode"],
+        waiting: ["poolNode", "dbNode", "timerNode"],
+        chips: {
+          jsChip: ["blue", "then 등록"],
+          libuvChip: ["green", "API 요청 위임"],
+          poolChip: ["amber", "API 응답 대기"],
+          dbChip: ["amber", "query 실행 중"],
+          microChip: ["", "pending"],
+          timerChip: ["amber", "timer 예약"]
+        },
+        stack: "apiPromise.then(...), dbPromise.then(...) 등록",
+        io: "외부 API 요청 진행 중, DB query 진행 중",
+        queue: "Timer 예약, Promise는 pending이라 microtask 없음",
+        queueItems: {
+          micro: [],
+          timer: ["timer callback"],
+          io: []
+        },
+        point: "then을 등록하는 것과 then callback이 Microtask Queue에 들어가는 것은 다른 시점이다.",
+        console: ["1"]
+      }),
+      step({
+        title: "console.log(2) 먼저 실행",
+        desc: "비동기 작업들이 밖에서 진행되는 동안 JS Thread는 남은 동기 코드인 console.log(2)를 실행한다.",
+        activeLine: 12,
+        active: ["jsNode"],
+        done: ["libuvNode"],
+        waiting: ["timerNode", "poolNode", "dbNode"],
+        chips: {
+          jsChip: ["blue", "console.log 실행"],
+          libuvChip: ["green", "위임 완료"],
+          poolChip: ["amber", "API 응답 대기"],
+          dbChip: ["amber", "query 실행 중"],
+          microChip: ["", "pending"],
+          timerChip: ["amber", "timer 예약"]
+        },
+        stack: "console.log(\"2\")",
+        io: "외부 API 요청과 DB query는 계속 진행 중",
+        queue: "Timer 예약, Promise then callback은 아직 없음",
+        queueItems: {
+          micro: [],
+          timer: ["timer callback"],
+          io: []
+        },
+        point: "그래서 여기까지 출력은 1 다음 2가 된다.",
+        console: ["1", "2"]
+      }),
+      step({
+        title: "Timer Queue 처리",
+        desc: "전역 동기 코드가 끝나고 Call Stack이 비면, 만료된 timer callback이 timer phase에서 실행된다.",
+        activeLine: 7,
+        active: ["loopNode", "timerNode", "jsNode"],
+        waiting: ["poolNode", "dbNode"],
+        chips: {
+          jsChip: ["blue", "timer 실행"],
+          loopChip: ["blue", "timer phase"],
+          microChip: ["", "pending"],
+          timerChip: ["green", "callback 전달"],
+          poolChip: ["amber", "API 응답 대기"],
+          dbChip: ["amber", "query 실행 중"]
+        },
+        stack: "timer callback → console.log(\"timer\")",
+        io: "외부 API 요청과 DB query는 계속 진행 중",
+        queue: "Timer callback 실행, Promise는 아직 pending",
+        queueItems: {
+          micro: [],
+          timer: [{ label: "timer callback", status: "running" }],
+          io: []
+        },
+        point: "I/O Promise가 아직 완료되지 않았다면 microtask도 아직 없다.",
+        console: ["1", "2", "timer"]
+      }),
+      step({
+        title: "외부 API 응답 후 Promise fulfilled",
+        desc: "외부 API 응답이 도착하면 apiPromise가 fulfilled 된다. 이때 등록해 둔 then callback이 Microtask Queue에 들어간다.",
+        activeLine: 9,
+        active: ["poolNode", "microNode"],
+        waiting: ["dbNode", "microNode"],
+        chips: {
+          jsChip: ["green", "Call Stack 비움"],
+          libuvChip: ["green", "API 응답 감지"],
+          loopChip: ["", "감시 중"],
+          microChip: ["amber", "api then 대기"],
+          timerChip: ["green", "비움"],
+          poolChip: ["green", "API 응답 완료"],
+          dbChip: ["amber", "query 실행 중"]
+        },
+        stack: "비어 있음",
+        io: "외부 API 응답 완료, DB query 진행 중",
+        queue: "Microtask Queue: apiPromise.then callback",
+        queueItems: {
+          micro: ["apiPromise.then"],
+          timer: [],
+          io: []
+        },
+        point: "Promise 기반 네트워크 요청에서는 응답 후 then callback이 Microtask Queue로 들어간다.",
+        console: ["1", "2", "timer"]
+      }),
+      step({
+        title: "api then microtask 실행",
+        desc: "Call Stack이 비어 있으므로 Microtask Queue의 apiPromise.then callback이 JS Thread에서 실행된다.",
+        activeLine: 9,
+        active: ["microNode", "loopNode", "jsNode"],
+        done: ["microNode", "timerNode"],
+        waiting: ["dbNode"],
+        chips: {
+          jsChip: ["blue", "api then 실행"],
+          libuvChip: ["green", "응답 감지"],
+          poolChip: ["green", "API 완료"],
+          dbChip: ["amber", "query 실행 중"],
+          microChip: ["green", "callback 전달"],
+          timerChip: ["green", "비움"],
+          ioQueueChip: ["", "비어 있음"],
+          loopChip: ["blue", "microtask"]
+        },
+        stack: "apiPromise.then callback → console.log(\"api then\")",
+        io: "외부 API 응답 완료, DB query 진행 중",
+        queue: "Microtask Queue에서 api then callback 처리",
+        queueItems: {
+          micro: [{ label: "apiPromise.then", status: "running" }],
+          timer: [],
+          io: []
+        },
+        point: "실제 API 요청은 밖에서 끝났고, 완료 후 JS 후속 처리는 microtask로 실행된다.",
+        console: ["1", "2", "timer", "api then"]
+      }),
+      step({
+        title: "DB query 완료 후 Promise fulfilled",
+        desc: "DB 응답이 도착하면 dbPromise가 fulfilled 되고, 등록해 둔 then callback이 Microtask Queue에 들어간다. connection은 pool에 반납된다.",
+        activeLine: 11,
+        active: ["dbNode", "microNode"],
+        done: ["microNode", "timerNode", "poolNode"],
+        waiting: ["microNode"],
+        chips: {
+          jsChip: ["green", "Call Stack 비움"],
+          libuvChip: ["green", "완료"],
+          poolChip: ["green", "완료"],
+          dbChip: ["green", "connection 반납"],
+          microChip: ["amber", "db then 대기"],
+          timerChip: ["green", "비움"],
+          ioQueueChip: ["", "비어 있음"],
+          loopChip: ["", "감시 중"]
+        },
+        stack: "비어 있음",
+        io: "DB query 완료",
+        queue: "Microtask Queue: dbPromise.then callback",
+        queueItems: {
+          micro: ["dbPromise.then"],
+          timer: [],
+          io: []
+        },
+        point: "DB 병목은 Event Loop보다 DB connection pool, DB 서버 성능, query 비용에서 먼저 생기는 경우가 많다.",
+        console: ["1", "2", "timer", "api then"]
+      }),
+      step({
+        title: "db then microtask 실행",
+        desc: "dbPromise.then callback도 Microtask Queue에서 꺼내져 JS Thread에서 실행된다.",
+        activeLine: 11,
+        active: ["microNode", "loopNode", "jsNode"],
+        done: ["timerNode", "poolNode", "dbNode"],
+        waiting: [],
+        chips: {
+          jsChip: ["blue", "db then 실행"],
+          libuvChip: ["green", "완료"],
+          poolChip: ["green", "완료"],
+          dbChip: ["green", "완료"],
+          microChip: ["green", "callback 전달"],
+          timerChip: ["green", "비움"],
+          ioQueueChip: ["", "비어 있음"],
+          loopChip: ["blue", "microtask"]
+        },
+        stack: "dbPromise.then callback → console.log(\"db then\")",
+        io: "DB query 완료",
+        queue: "Microtask Queue에서 db then callback 처리",
+        queueItems: {
+          micro: [{ label: "dbPromise.then", status: "running" }],
+          timer: [],
+          io: []
+        },
+        point: "Promise then callback은 실제 작업 스레드에서 실행되는 게 아니라 JS Thread에서 실행된다.",
+        console: ["1", "2", "timer", "api then", "db then"]
+      }),
+      step({
+        title: "전체 흐름 정리",
+        desc: "실제 비동기 작업은 외부 자원에서 처리되고, Promise가 완료되면 then callback이 Microtask Queue에 들어와 JS Thread에서 실행된다.",
+        activeLine: 0,
+        active: ["loopNode"],
+        done: ["jsNode", "libuvNode", "poolNode", "dbNode", "microNode", "timerNode", "ioQueueNode"],
+        chips: {
+          jsChip: ["green", "완료"],
+          libuvChip: ["green", "완료"],
+          poolChip: ["green", "완료"],
+          dbChip: ["green", "완료"],
+          microChip: ["green", "비움"],
+          timerChip: ["green", "비움"],
+          ioQueueChip: ["green", "비움"],
+          loopChip: ["green", "순환 계속"]
+        },
+        stack: "비어 있음",
+        io: "모든 예시 작업 완료",
+        queue: "Microtask, Timer, I/O Queue 비어 있음",
+        point: "비동기란 무제한 병렬 처리가 아니라, 기다리는 작업을 외부 자원에 맡기고 완료 후 JS 후속 작업을 queue에서 실행하는 구조다.",
+        console: ["1", "2", "timer", "api then", "db then"]
+      })
+    ];
+
+    let currentStep = 0;
+
+    const nodeIds = ["jsNode", "libuvNode", "poolNode", "dbNode", "microNode", "timerNode", "ioQueueNode", "loopNode"];
+    const chipIds = ["jsChip", "libuvChip", "poolChip", "dbChip", "microChip", "timerChip", "ioQueueChip", "loopChip"];
+
+    function renderCode(activeLine) {
+      document.getElementById("codeBlock").innerHTML = codeLines
+        .map((line, index) => {
+          const escaped = line
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          if (index === activeLine) {
+            return `<span class="active-line">${escaped || " "}</span>`;
+          }
+          return escaped || " ";
+        })
+        .join("\n");
+    }
+
+    function setChip(id, config) {
+      const resolved = config || baseChips[id];
+      const chip = document.getElementById(id);
+      chip.className = "chip";
+      if (resolved[0]) {
+        chip.classList.add(resolved[0]);
+      }
+      chip.textContent = resolved[1];
+    }
+
+    function renderTimeline() {
+      const timeline = document.getElementById("timeline");
+      timeline.style.setProperty("--step-count", steps.length);
+      timeline.innerHTML = "";
+      steps.forEach((_, index) => {
+        const tick = document.createElement("div");
+        tick.className = "tick";
+        if (index < currentStep) tick.classList.add("done");
+        if (index === currentStep) tick.classList.add("active");
+        timeline.appendChild(tick);
+      });
+    }
+
+    function renderQueueItems(id, items) {
+      const container = document.getElementById(id);
+      container.innerHTML = "";
+
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "queue-empty";
+        empty.textContent = "empty";
+        container.appendChild(empty);
+        return;
+      }
+
+      items.forEach((item) => {
+        const data = typeof item === "string" ? { label: item, status: "waiting" } : item;
+        const element = document.createElement("div");
+        element.className = "queue-item";
+        if (data.status === "running") {
+          element.classList.add("running");
+        }
+        element.textContent = data.label;
+        container.appendChild(element);
+      });
+    }
+
+    function render() {
+      const step = steps[currentStep];
+
+      renderCode(step.activeLine);
+
+      nodeIds.forEach((id) => {
+        const node = document.getElementById(id);
+        node.classList.remove("active", "done", "waiting");
+        if (step.done.includes(id)) node.classList.add("done");
+        if (step.waiting.includes(id)) node.classList.add("waiting");
+        if (step.active.includes(id)) node.classList.add("active");
+      });
+
+      chipIds.forEach((id) => setChip(id, step.chips[id]));
+
+      document.getElementById("stepTitle").textContent = step.title;
+      document.getElementById("stepDesc").textContent = step.desc;
+      document.getElementById("stepNumber").textContent = `${currentStep + 1} / ${steps.length}`;
+      document.getElementById("stackState").textContent = step.stack;
+      document.getElementById("ioState").textContent = step.io;
+      document.getElementById("queueState").textContent = step.queue;
+      document.getElementById("pointState").textContent = step.point;
+      document.getElementById("consoleStatus").textContent = step.console.length ? `${step.console.length} lines` : "출력 없음";
+      document.getElementById("consoleOutput").innerHTML = step.console.length
+        ? step.console.map((line) => `&gt; ${line}`).join("\n")
+        : '<span class="console-empty">아직 출력 없음</span>';
+      renderQueueItems("microItems", step.queueItems.micro);
+      renderQueueItems("timerItems", step.queueItems.timer);
+      renderQueueItems("ioItems", step.queueItems.io);
+
+      document.getElementById("prevBtn").disabled = currentStep === 0;
+      document.getElementById("nextBtn").disabled = currentStep === steps.length - 1;
+
+      renderTimeline();
+    }
+
+    document.getElementById("prevBtn").addEventListener("click", () => {
+      currentStep = Math.max(0, currentStep - 1);
+      render();
+    });
+
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      currentStep = Math.min(steps.length - 1, currentStep + 1);
+      render();
+    });
+
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      currentStep = 0;
+      render();
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight") {
+        currentStep = Math.min(steps.length - 1, currentStep + 1);
+        render();
+      }
+      if (event.key === "ArrowLeft") {
+        currentStep = Math.max(0, currentStep - 1);
+        render();
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
